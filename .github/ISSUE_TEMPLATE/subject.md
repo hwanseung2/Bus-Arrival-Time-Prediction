@@ -2,7 +2,7 @@
 name: Subject
 about: 개발 사항 정리
 title: ''
-labels: enhancement
+labels: develop
 assignees: hwanseung2
 
 ---
