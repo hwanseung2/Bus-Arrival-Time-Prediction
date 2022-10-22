@@ -355,7 +355,21 @@ class Preprocessor():
         del concat_hour
             
         return concat
-        
+
+
+    def delete_duplication(self, concat):
+        missing_grouped = concat.groupby(['data_index'])
+        idxes = np.array([])
+        for name, group in tqdm(missing_grouped):
+            s_s = np.array(group['station_seq'].values)
+            unique = np.unique(s_s, return_counts = True)
+            if np.any(unique[1] > 1):
+                idx = group[group['next_duration'] == 0].index
+                idxes = np.append(idxes, np.array(idx))
+        concat = concat.drop(idxes, axis = 0)
+        concat = concat.reset_index(drop = True)
+        return concat
+
 
     def preprocess_train_dataset(self):
         print("load train data to preprocess...")
