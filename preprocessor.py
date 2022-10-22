@@ -384,6 +384,29 @@ class Preprocessor():
         return concat
 
 
+    def split_data(self, concat):
+        # train_idx, valid_idx = train_test_split(np.arange(1,383327 + 1), test_size = 0.2)
+        train_idx, valid_idx = train_test_split(np.arange(1,383327 + 1), test_size = 0.2)
+        train_idx, valid_idx = set(train_idx.tolist()), set(valid_idx.tolist())
+        data_grouped = concat.groupby(['data_index'])
+        train_list = []
+        valid_list = []
+        for idx, group in data_grouped:
+            if idx in train_idx:
+                train_list.append(group)
+            else:
+                valid_list.append(group)
+        trainset = pd.concat(train_list)
+        validset = pd.concat(valid_list)
+
+        trainset = trainset.reset_index(drop = True)
+        validset = validset.reset_index(drop = True)
+        trainset = trainset.sort_values(by = ["data_index", "station_seq"], ignore_index = True)
+        validset = validset.sort_values(by = ["data_index", "station_seq"], ignore_index = True)
+
+        return trainset, validset
+
+
     def preprocess_train_dataset(self):
         print("load train data to preprocess...")
         train_data, train_label = self._load_train_dataset()
