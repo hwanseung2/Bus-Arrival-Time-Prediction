@@ -244,3 +244,39 @@ class Trainer():
             nsml.save(str(epoch + 1))
             if self.args.using_lradj and (self.args.lradj == 'type3' or self.args.lradj == 'type4') and t > 10002:
                 adjust_learning_rate(self.optimizer, epoch, t, self.args)
+    
+    
+    def testing(self, test_data, k, n):
+        self.model.eval()
+        seq_len = k - 1
+        label_len = k - 1
+        pred_len = n - k + 1
+        self.model.pred_len = pred_len
+
+
+        test_data = test_data[['route_id', 'station_id', 'direction', 'hour', 'dow',  'next_station_distance',\
+                            'prev_duration']]
+
+        data = test_data.values
+
+        data[:, 4] = data[:, 4] / 7 - 0.5
+        seq_x = torch.tensor(data[np.newaxis, :seq_len, 6:])
+        seq_y = torch.tensor(data[np.newaxis, :label_len, 6:])
+        seq_x_mark = torch.tensor(data[np.newaxis, :seq_len, :6])
+        seq_y_mark = torch.tensor(data[np.newaxis, :, :6])
+        seq_x_mark = seq_x_mark.float().cuda()
+        seq_y_mark = seq_y_mark.float().cuda()
+
+        seq_x = seq_x.float().cuda()
+        seq_y = seq_y.float()
+
+
+        dec_inp = torch.zeros([1, pred_len, seq_y.shape[-1]]).float()
+        dec_inp = torch.cat([seq_y[:, :label_len, -1:], dec_inp], dim=1).float().cuda()
+
+        output = self.model(seq_x, seq_x_mark, dec_inp, seq_y_mark)
+        output = output[0,:,0].detach().cpu().numpy()
+        output = (output * self.train_std) + self.train_mean
+        output = output.tolist()
+
+        return output
