@@ -481,7 +481,6 @@ class Preprocessor():
 
         concat['next_station_distance'] = self.dist_normalizer.normalize(concat['next_station_distance'])
         concat['prev_station_distance'] = self.dist_normalizer.normalize(concat['prev_station_distance'])
-        # concat['prev_duration'] = self.dur_normalizer.normalize(concat['prev_duration'])
         print("[INFO - STANDARD SCALER] PREV NEXT DISTANCE와 PREV DURATION만 normalize")
         print("[INFO - STANDARD SCALER] NEXT DURATION 적용 X", '\n\n')
 
@@ -496,3 +495,153 @@ class Preprocessor():
         print(validset.head(150))
 
         return trainset, validset, self.dur_normalizer
+
+
+    def process_missing_value_for_test(self, test_data, k, n):
+        idx = test_data[test_data['check_seq'] == False].index
+        test_data.loc[idx, ['prev_duration']] = test_data.loc[idx, ['check_seq', 'prev_duration', 'route_id', 'station_seq']]\
+            .apply(lambda x: hash_mapping(x[0], 'mean', x[1], x[2], x[3], self.prev_mean_hash), axis = 1)
+
+        test_data = test_data[['route_id', 'dow', 'hour', 'plate_no', 'operation_id', 'station_id', 'station_seq', \
+                        'next_station_distance', 'data_index', 'prev_duration']]
+        data_entry_list = []
+
+        route_id = test_data['route_id'].iloc[0]
+        dow = int(test_data['dow'].iloc[0])
+        plate_no = test_data['plate_no'].iloc[0]
+        operation_id = test_data['operation_id'].iloc[0]
+        data_index = test_data['data_index'].iloc[0]
+
+        series_station_seq = set(list(test_data['station_seq']))
+        missing_seq_list = [x for x in range(1, n+1) if x not in series_station_seq]
+        for seq_case in missing_seq_list:
+            if seq_case < k:
+                if self.prev_mean_hash.get((route_id, seq_case)) != None:
+                    case = {
+                            'route_id': route_id, 'dow': dow, 'plate_no': plate_no, 'operation_id': operation_id,
+                            'station_id': self.distance_hash[(route_id, seq_case)][0],
+                            'station_seq': seq_case, 'hour':np.nan,
+                            'next_station_distance': self.distance_hash[(route_id, seq_case)][1],
+                            'data_index': data_index, 'prev_duration': self.prev_mean_hash[(route_id, seq_case)]
+                        }
+                    data_entry_list.append(case)
+                else:
+                    if (route_id == 1358 and seq_case == 124) or (route_id == 1067 and seq_case == 116):
+                        case = {
+                            'route_id': route_id, 'dow': dow, 'station_id': self.distance_hash[(route_id, seq_case)][0],
+                            'station_seq': seq_case,'hour':np.nan,
+                            'next_station_distance': self.distance_hash[(route_id, seq_case)][1],
+                            'data_index': data_index, 'prev_duration': 38,
+                            }
+                        data_entry_list.append(case)
+                    else:
+                        raise ValueError
+            elif seq_case >= k:
+                case = {
+                        'route_id': route_id, 'dow': dow, 'plate_no': plate_no, 'operation_id': operation_id,
+                        'station_id': self.distance_hash[(route_id, seq_case)][0],
+                        'station_seq': seq_case,'hour':np.nan,
+                        'next_station_distance': self.distance_hash[(route_id, seq_case)][1],
+                        'data_index': data_index, 'prev_duration': np.nan
+                        }
+                data_entry_list.append(case)
+        new = pd.DataFrame(data_entry_list)
+        test_data = pd.concat([test_data, new]).sort_values(by = ['data_index', 'station_seq'], ignore_index = True)
+        """
+        outlier 제거!!!!
+        """
+        idx = test_data[test_data['prev_duration'] > 1500].index
+        test_data.loc[idx, ['prev_duration']] = test_data.loc[idx, ['prev_duration', 'route_id', 'station_seq']]\
+            .apply(lambda x: hash_mapping(False, 'median', x[0], x[1], x[2], self.prev_median_hash), axis = 1)
+
+        # concat = concat.groupby(['data_index']).fillna(method = 'ffill').fillna(method = 'bfill')
+        test_data_hour = test_data.groupby(['data_index']).fillna(method = 'ffill').fillna(method = 'bfill')
+        test_data['hour'] = test_data_hour['hour']
+        
+        return test_data
+
+    def delete_duplication_for_test(self, test_data):
+        s_s = np.array(test_data['station_seq'].values)
+        unique = np.unique(s_s, return_counts = True)
+        if np.any(unique[1] > 1):
+            test_data = test_data.iloc[1:]
+            test_data = test_data.reset_index(drop = True)
+        return test_data
+
+    def replace_outlier_using_mean_for_test(self, test_data):
+        idx = test_data[test_data['prev_duration'] < 5].index
+        test_data.loc[idx, ['prev_duration']] = test_data.loc[idx, ['prev_duration', 'route_id', 'station_seq']]\
+            .apply(lambda x: hash_mapping(False, 'mean', x[0], x[1], x[2], self.prev_mean_hash), axis = 1)
+
+        return test_data
+
+    def preprocess_test_data(self, test_data):
+
+        data_index = test_data['data_index'].iloc[0]
+        route_id = test_data["route_id"].iloc[0]
+        plate_no = test_data["plate_no"].iloc[0]
+        operation_id = test_data["operation_id"].iloc[0]
+
+        info = {'data_index': data_index, 'route_id': route_id, 'plate_no': plate_no, 'operation_id': operation_id}
+
+        # windowing to get prev duration
+        test_data["prev_ts"] = test_data["ts"].shift(1)
+        test_data['prev_seq'] = test_data['station_seq'].shift(1)
+        test_data["prev_ts"] = test_data["prev_ts"].fillna(0)
+        test_data["prev_duration"] = np.where(test_data["prev_ts"] == 0, 0, test_data["ts"] - test_data["prev_ts"])
+        test_data['check_seq'] = np.where(test_data['station_seq'] - test_data['prev_seq'] == 1, True, False)
+
+        # raise Exception(f"{test_data}")
+
+        # find N and K
+        test_data_selected = test_data.sort_values(["data_index","station_seq"]).reset_index(drop=True)
+        null_data = test_data_selected[test_data_selected["ts"].isnull()]
+
+        k = null_data["station_seq"].min()
+        n = null_data["station_seq"].max()
+
+        if route_id == 5113 and k <= 61:
+            flag_300 = True
+        else:
+            flag_300 = False
+        
+        if route_id == 1346 and k <= 33:
+            flag_1346 = True
+        else:
+            flag_1346 = False
+
+        flag = True
+        if isinstance(k, float) == False:
+            flag = False
+            test_data_selected = self.process_missing_value_for_test(test_data = test_data_selected, k = k, n = n)
+            test_data_selected = self.delete_duplication_for_test(test_data_selected)
+            test_data_selected = self.replace_outlier_using_mean_for_test(test_data_selected)
+
+            direc_df = pd.merge(test_data_selected, self.route_df[['route_id', 'turning_point_sequence']], on = 'route_id')
+            test_data_selected['direction'] = np.where(test_data_selected['station_seq'] <= direc_df['turning_point_sequence'], 0, 1)
+
+            test_data_selected['prev_station_distance'] = test_data_selected['next_station_distance'].shift(1)
+            test_data_selected['prev_station_distance'] = test_data_selected['prev_station_distance'].fillna(0)
+
+            test_data_selected['next_station_distance'] = self.dist_normalizer.normalize(test_data_selected['next_station_distance'])
+            test_data_selected['prev_station_distance'] = self.dist_normalizer.normalize(test_data_selected['prev_station_distance'])
+            test_data_selected['prev_duration'] = self.dur_normalizer.normalize(test_data_selected['prev_duration'])
+
+
+            test_data_selected['route_id'] = self.route_encoder.transform(test_data_selected['route_id'])
+            test_data_selected['station_id'] = self.station_encoder.transform(test_data_selected['station_id'])
+            # raise Exception(f"{test_data_selected}")
+            # if k < 32:
+            #     raise Exception(f"\n\nk: {k}\n\n test data: \n{test_data}\n\n\n test_data selected :\n{test_data_selected}\n\n ")
+            unique = np.unique(np.array(test_data_selected['station_seq']), return_counts = True)
+            if np.any(unique[1] > 1):
+                raise Exception(f"\n unique : {unique}, \n\n test_data: \n {test_data}\n\ntest_data_selected:\n {test_data_selected}")
+
+        #총 n-k + 1개를 예측해야함.
+        return test_data_selected, k, n, info, flag, flag_300, flag_1346
+
+
+
+if __name__ == '__main__':
+    preprocessor = Preprocessor(None)
+    preprocessor.preprocess_train_dataset()
