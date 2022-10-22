@@ -407,6 +407,22 @@ class Preprocessor():
         return trainset, validset
 
 
+    def sampling(self, concat):
+        full_len = 383328
+        sample_len = int(full_len * self.args.random_sampling)
+        sampling_idx = np.random.choice(full_len, sample_len)
+        sampling_idx = set(sampling_idx.tolist())
+        data_grouped = concat.groupby(['data_index'])
+        sampling_list = []
+        for idx, group in data_grouped:
+            if idx in sampling_idx:
+                sampling_list.append(group)
+            
+        sampled = pd.concat(sampling_list)
+
+        return sampled
+
+
     def preprocess_train_dataset(self):
         print("load train data to preprocess...")
         train_data, train_label = self._load_train_dataset()
