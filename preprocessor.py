@@ -152,6 +152,211 @@ class Preprocessor():
         return train_data, train_label
 
 
+    def process_missing_value(self, concat, mode, k):
+        print("[INFO - IMPUTATION]: imputation setting")
+        outlier = concat[concat['next_duration'] > 1500][['route_id', 'station_seq']]
+        outlier_list = []
+        for index, row in outlier.iterrows():
+            route_id = row['route_id']
+            station_seq = row['station_seq']
+            outlier_list.append((route_id, station_seq))
+        outlier_set = set(outlier_list) 
+
+        """
+        check seq이 True인 애들로만 할 필요가 없음. next_duration은 next station을 명시하고 있으니까.
+        """
+        prev_median_grouped = concat.groupby(['route_id', 'station_seq'])
+        for name, group in prev_median_grouped:
+            prev_median = np.median(group['prev_duration'])
+            self.prev_median_hash[name] = prev_median
+            next_median = np.median(group['next_duration'])
+            self.next_median_hash[name] = next_median
+
+        for key_ in self.prev_median_hash.keys():
+            if self.prev_median_hash[key_] > 1500:
+                print(key_, self.prev_median_hash[key_])
+        
+        print("#" * 50)
+        print("#" * 50)
+        print("#" * 50)
+        for key_ in self.next_median_hash.keys():
+            if self.next_median_hash[key_] > 1500:
+                print(key_, self.next_median_hash[key_])
+        
+        idx = concat[concat['prev_duration'] > 1500].index
+        concat.loc[idx, ['prev_duration']] = concat.loc[idx, ['prev_duration', 'route_id', 'station_seq']]\
+            .apply(lambda x: hash_mapping(False, 'median', x[0], x[1], x[2], self.prev_median_hash), axis = 1)
+
+        idx = concat[concat['next_duration'] > 1500].index
+        concat.loc[idx, ['next_duration']] = concat.loc[idx, ['next_duration', 'route_id', 'station_seq']]\
+            .apply(lambda x: hash_mapping(False, 'median', x[0], x[1], x[2], self.next_median_hash), axis = 1)
+
+        print("median 처리 후, next_duration에 1500 이상 값 있는지 체크")
+        print(concat[concat['next_duration'] > 1500].head(200))
+
+
+
+        """
+        start
+        """
+        concat_complete = concat[concat['check_seq'] == True]
+
+        prev_mean_grouped = concat_complete.groupby(['route_id', 'station_seq'])
+
+        for name, group in prev_mean_grouped:
+            mean_ = group['prev_duration'].mean()
+            self.prev_mean_hash[name] = mean_
+        
+        iteration = list(self.prev_mean_hash.keys()).copy()
+        for key_ in iteration:
+            self.prev_mean_hash[(key_[0], 1)] = 0
+        
+        del concat_complete
+        del prev_mean_grouped
+        del prev_median_grouped
+
+        print("[INFO - IMPUTATION]: calculating prev mean dataframe")
+        print("[INFO - IMPUTATION]: replace previous duration, check_seq == False case only")
+        idx = concat[concat['check_seq'] == False].index
+        concat.loc[idx, ['prev_duration']] = concat.loc[idx, ['check_seq', 'prev_duration', 'route_id', 'station_seq']]\
+            .apply(lambda x: hash_mapping(x[0], 'mean', x[1], x[2], x[3], self.prev_mean_hash), axis = 1)
+        concat['prev_seq'] = concat['prev_seq'].fillna(0)
+
+        print("[INFO - IMPUTATION]: calculating next mean dataframe")
+        next_mean_grouped = concat.groupby(['route_id', 'station_seq'])
+        for name, group in next_mean_grouped:
+            mean_ = group['next_duration'].mean()
+            self.next_mean_hash[name] = mean_
+        
+        del next_mean_grouped
+
+        print("[INFO - IMPUTATION]: select column")
+        concat = concat[['route_id', 'dow', 'station_id', 'station_seq', 'next_station_distance', 'hour', 'data_index', 'prev_duration', \
+                    'next_duration']]
+        missing_grouped = concat.groupby(['data_index'])
+
+        imputation_cnt = 0
+        missing_cnt = {'1': 0, '2': 0, '3': 0}
+        data_entry_list = []
+
+        for name, group in tqdm(missing_grouped):
+            route_id = group['route_id'].iloc[0]
+            dow = int(group['dow'].iloc[0])
+            series_station_seq = set(list(group['station_seq']))
+            if mode == 'train':
+                missing_seq_list = [x for x in range(1, self.station_seq_hash[route_id] - 1) if x not in series_station_seq]
+            for seq_case in missing_seq_list:
+                if (route_id, seq_case) not in outlier_set:
+                    if self.prev_mean_hash.get((route_id, seq_case)) != None and self.next_mean_hash.get((route_id, seq_case)) != None:
+                        # 둘 다 hash에 있는 경우
+                        case = {
+                            'route_id': route_id, 'dow': dow, 'station_id': self.distance_hash[(route_id, seq_case)][0],
+                            'station_seq': seq_case, 'hour': np.nan,
+                            'next_station_distance': self.distance_hash[(route_id, seq_case)][1],
+                            'data_index': name, 'prev_duration': self.prev_mean_hash[(route_id, seq_case)],
+                            'next_duration': self.next_mean_hash[(route_id, seq_case)]
+                        }
+                        data_entry_list.append(case)
+                        imputation_cnt += 1
+
+                    elif self.prev_mean_hash.get((route_id, seq_case)) != None and self.next_mean_hash.get((route_id, seq_case)) == None:
+                        #prev mean은 계산 돼 있고, next_mean이 없는 경우.
+                        missing_cnt['1'] += 1
+                        print("is test set imputation error case 1?")
+                        raise ValueError
+
+                    elif self.prev_mean_hash.get((route_id, seq_case)) == None and self.next_mean_hash.get((route_id, seq_case)) != None:
+                        if (route_id == 1358 and seq_case == 124) or (route_id == 1067 and seq_case == 116):
+                            case = {
+                            'route_id': route_id, 'dow': dow, 'station_id': self.distance_hash[(route_id, seq_case)][0],
+                            'station_seq': seq_case, 'hour': np.nan,
+                            'next_station_distance': self.distance_hash[(route_id, seq_case)][1],
+                            'data_index': name, 'prev_duration': 38,
+                            'next_duration': self.next_mean_hash[(route_id, seq_case)]
+                            }
+                            data_entry_list.append(case)
+                        else:
+                            print("except 1358, 1067 route id imputation case 2")
+                            raise ValueError
+                        missing_cnt['2'] += 1
+                    else:
+                        # print("hash에 하나라도 없는 경우")
+                        if (route_id == 1358 and seq_case == 123) or (route_id == 1067 and seq_case == 115):
+                            case = {
+                            'route_id': route_id, 'dow': dow, 'station_id': self.distance_hash[(route_id, seq_case)][0],
+                            'station_seq': seq_case, 'hour': np.nan,
+                            'next_station_distance': self.distance_hash[(route_id, seq_case)][1],
+                            'data_index': name, 'prev_duration': 120,
+                            'next_duration': 38
+                            }
+                            data_entry_list.append(case)
+                        # else는 그냥 패스하면됨
+                        missing_cnt['3'] += 1
+                elif (route_id, seq_case) in outlier_set:
+                    if self.prev_median_hash.get((route_id, seq_case)) != None and self.next_median_hash.get((route_id, seq_case)) != None:
+                        # 둘 다 hash에 있는 경우
+                        case = {
+                            'route_id': route_id, 'dow': dow, 'station_id': self.distance_hash[(route_id, seq_case)][0],
+                            'station_seq': seq_case, 'hour': np.nan,
+                            'next_station_distance': self.distance_hash[(route_id, seq_case)][1],
+                            'data_index': name, 'prev_duration': self.prev_median_hash[(route_id, seq_case)],
+                            'next_duration': self.next_median_hash[(route_id, seq_case)]
+                        }
+                        data_entry_list.append(case)
+                        imputation_cnt += 1
+
+                    elif self.prev_median_hash.get((route_id, seq_case)) != None and self.next_median_hash.get((route_id, seq_case)) == None:
+                        #prev median은 계산 돼 있고, next_median이 없는 경우.
+                        missing_cnt['1'] += 1
+                        print("is test set imputation error case 1?")
+                        raise ValueError
+
+                    elif self.prev_median_hash.get((route_id, seq_case)) == None and self.next_median_hash.get((route_id, seq_case)) != None:
+                        if (route_id == 1358 and seq_case == 124) or (route_id == 1067 and seq_case == 116):
+                            case = {
+                            'route_id': route_id, 'dow': dow, 'station_id': self.distance_hash[(route_id, seq_case)][0],
+                            'station_seq': seq_case, 'hour': np.nan,
+                            'next_station_distance': self.distance_hash[(route_id, seq_case)][1],
+                            'data_index': name, 'prev_duration': 38,
+                            'next_duration': self.next_median_hash[(route_id, seq_case)]
+                            }
+                            data_entry_list.append(case)
+                        else:
+                            print("except 1358, 1067 route id imputation case 2")
+                            raise ValueError
+                        missing_cnt['2'] += 1
+                    else:
+                        # print("hash에 하나라도 없는 경우")
+                        if (route_id == 1358 and seq_case == 123) or (route_id == 1067 and seq_case == 115):
+                            case = {
+                            'route_id': route_id, 'dow': dow, 'station_id': self.distance_hash[(route_id, seq_case)][0],
+                            'station_seq': seq_case, 'hour': np.nan,
+                            'next_station_distance': self.distance_hash[(route_id, seq_case)][1],
+                            'data_index': name, 'prev_duration': 120,
+                            'next_duration': 38
+                            }
+                            data_entry_list.append(case)
+                        # else는 그냥 패스하면됨
+                        missing_cnt['3'] += 1
+        print("[INFO - IMPUTATION]: create data entry list end & make dataframe")
+        new = pd.DataFrame(data_entry_list)
+        concat = pd.concat([concat, new]).sort_values(by = ['data_index', 'station_seq'], ignore_index = True)
+
+        print("[INFO- IMPUTATION]: imputation end")
+        print(f">>>>>>> imputation count : {imputation_cnt}, prev mean만 존재 : {missing_cnt['1']}, next mean만 존재 : {missing_cnt['2']}, 둘 다 mean이 없는 경우 : {missing_cnt['3']}, total : {missing_cnt['1'] + missing_cnt['2'] + missing_cnt['3']}")
+
+        """
+        여기부터 짜야함!!!!
+        여기짜고 테스트셋에도 똑같이 반영!!!!
+        """
+        
+        concat_hour = concat.groupby(['data_index']).fillna(method = 'ffill').fillna(method = 'bfill')
+        concat['hour'] = concat_hour['hour']
+        del concat_hour
+            
+        return concat
+        
+
     def preprocess_train_dataset(self):
         print("load train data to preprocess...")
         train_data, train_label = self._load_train_dataset()
