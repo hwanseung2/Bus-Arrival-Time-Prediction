@@ -2,11 +2,11 @@
 
 <img src="https://img.shields.io/badge/Ubuntu-E95420?style=flat-square&logo=Ubuntu&logoColor=white"> <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=Python&logoColor=white"> <img src="https://img.shields.io/badge/Pytorch-EE4C2C?style=flat-square&logo=Pytorch&logoColor=white"> 
 
-4th place solution to [CLOVA AI RUSH 2022: Bus arrival time prediction](https://campaign.naver.com/clova_airush/)
+**4th** place solution to [CLOVA AI RUSH 2022: Bus arrival time prediction](https://campaign.naver.com/clova_airush/)
 
 
 ## 🎯 Result
-RMSE error 46.36 sec / baseline RMSE error 75.51 sec
+RMSE error **46.36 sec** / baseline RMSE error 75.51 sec
 
 ## 📌  Dataset features
 실시간 로그로 구성된 데이터로, 노이즈가 존재하여 실시간 로그 중 k번째 해당되는 실시간 로그가 존재하지 않을 수 있고, 따라서 정류장 시퀀스가 순차적이지 않을 수 있는 특징이 존재.
