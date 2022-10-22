@@ -118,3 +118,129 @@ class Trainer():
         self.args = args
         self.train_mean = None
         self.train_std = None
+
+
+    def _process_one_batch(self, batch_x, batch_y, batch_x_mark, batch_y_mark):
+        batch_x = batch_x.float().cuda()
+        batch_y = batch_y.float()
+        batch_x_mark = batch_x_mark.float().cuda()
+        batch_y_mark = batch_y_mark.float().cuda()
+
+        if self.args.padding == 0:
+            dec_inp = torch.zeros([batch_y.shape[0], self.args.pred_len, batch_y.shape[-1]]).float()
+        elif self.args.padding==1:
+            dec_inp = torch.ones([batch_y.shape[0], self.args.pred_len, batch_y.shape[-1]]).float()
+        dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().cuda()
+
+        if self.args.output_attention:
+            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+        else:
+            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+        
+        f_dim = -1 
+        batch_y = batch_y[:, -self.args.pred_len:, :].cuda()
+
+        return outputs, batch_y
+
+    def validation(self, valid_loader):
+        self.model.eval()
+        total_loss = []
+
+        preds = []
+        trues = []
+        with torch.no_grad():
+            for i, (batch_x,batch_y,batch_x_mark,batch_y_mark) in enumerate(valid_loader):
+                pred, true = self._process_one_batch(batch_x, batch_y, batch_x_mark, batch_y_mark)
+                preds.append(pred.detach().cpu().numpy())
+                trues.append(true.detach().cpu().numpy())
+
+        preds = np.array(preds)
+        trues = np.array(trues)
+        print('validation shape:', preds.shape, trues.shape)
+        preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
+        trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
+        print('validation shape:', preds.shape, trues.shape)
+
+        mae, mse, rmse, mape, mspe = metric(preds, trues)
+        print('mse:{}, mae:{}'.format(mse, mae))
+
+        self.model.train()
+        return mae.item(), mse.item(), rmse.item()
+
+    def training(self):
+        trainset, validset, dur_normalizer = self.preprocessor.preprocess_train_dataset()
+        print("[INFO - TRAINER]: Finished preprocessing training data...")
+
+        trainset = MyDatasetTraining(trainset, self.args.seq_len, self.args.label_len, self.args.pred_len, 'train', self.args, dur_normalizer)
+        validset = MyDatasetTraining(validset, self.args.seq_len, self.args.label_len, self.args.pred_len, 'valid', self.args, dur_normalizer)
+        self.train_mean = dur_normalizer.train_mean
+        self.train_std = dur_normalizer.train_std
+        print(self.train_mean, self.train_std, dur_normalizer.train_mean, dur_normalizer.train_std)
+        
+        train_loader = DataLoader(trainset, batch_size = self.args.batch_size,\
+             shuffle = True, num_workers = self.args.num_workers, drop_last = True)
+
+        valid_loader = DataLoader(validset, batch_size = self.args.batch_size,\
+             shuffle = False, num_workers = self.args.num_workers, drop_last = True)
+
+
+        time_now = time.time()
+
+        train_steps = len(train_loader)
+        early_stopping = EarlyStopping(patience = self.args.patience, verbose = True)
+
+        """
+        initial validation
+        """
+        print()
+        print("[INFO - TRAINING] start")
+        t = 0
+        for epoch in range(self.args.train_epochs):
+            iter_count = 0
+            train_loss = []
+            self.model.train()
+            epoch_time = time.time()
+
+            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(train_loader):
+                iter_count += 1
+                self.optimizer.zero_grad()
+                pred, true = self._process_one_batch(batch_x, batch_y, batch_x_mark, batch_y_mark)
+                loss = self.criterion(pred, true)
+                train_loss.append(loss.item())
+
+                if (i+1) % 100 == 0:
+                    print("\titers: {0} / {1}, epoch: {2} | loss: {3:.7f}".format(i + 1, train_steps+1, epoch + 1, loss.item()))
+                    print("\n\n")
+                    speed = (time.time()-time_now)/iter_count
+                    left_time = speed*((self.args.train_epochs - epoch)*train_steps - i)
+                    print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
+                    print()
+                    print("[BATCH 0 SAMPLING] [PREDICTION]\n", pred[0,:,0], '\n', "[LABEL]\n", true[0,:,0], '\n\n')
+                    print("[BATCH 5 SAMPLING] [PREDICTION]\n", pred[5,:,0], '\n', "[LABEL]\n", true[5,:,0], '\n\n')
+                    print("[BATCH 9 SAMPLING] [PREDICTION]\n", pred[9,:,0], '\n', "[LABEL]\n", true[9,:,0], '\n\n')
+                    iter_count = 0
+                    time_now = time.time()
+
+                t += 1
+                loss.backward()
+                if self.args.using_lradj and (self.args.lradj == 'type3' or self.args.lradj == 'type4') and t <= 10002:
+                    adjust_learning_rate(self.optimizer, epoch, t, self.args)
+                self.optimizer.step()
+
+            
+            print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
+            train_loss = np.average(train_loss).item()
+            mae, mse, rmse = self.validation(valid_loader = valid_loader)
+            print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali RMSE: {3:.7f} ".format(
+                epoch + 1, train_steps, train_loss, rmse))
+            nsml.report(summary = True, scope = locals(), train_loss= train_loss, valid_rmse = rmse, \
+            valid_mae = mae, valid_mse = mse, step = epoch)
+            
+            early_stopping(mse, self.model)
+            if early_stopping.early_stop:
+                print("Early stopping")
+                break
+        
+            nsml.save(str(epoch + 1))
+            if self.args.using_lradj and (self.args.lradj == 'type3' or self.args.lradj == 'type4') and t > 10002:
+                adjust_learning_rate(self.optimizer, epoch, t, self.args)
