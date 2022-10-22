@@ -371,6 +371,19 @@ class Preprocessor():
         return concat
 
 
+    def replace_outlier_using_mean(self, concat):
+        print("[INFO - REPLACE]",'\n')
+
+        idx = concat[concat['prev_duration'] < 5].index
+        concat.loc[idx, ['prev_duration']] = concat.loc[idx, ['prev_duration', 'route_id', 'station_seq']]\
+            .apply(lambda x: hash_mapping(False, 'mean', x[0], x[1], x[2], self.prev_mean_hash), axis = 1)
+        idx = concat[concat['next_duration'] < 5].index
+        concat.loc[idx, ['next_duration']] = concat.loc[idx, ['next_duration', 'route_id', 'station_seq']]\
+            .apply(lambda x: hash_mapping(False, 'mean', x[0], x[1], x[2], self.next_mean_hash), axis = 1)
+        print("[INFO - REPLACE] End",'\n')
+        return concat
+
+
     def preprocess_train_dataset(self):
         print("load train data to preprocess...")
         train_data, train_label = self._load_train_dataset()
