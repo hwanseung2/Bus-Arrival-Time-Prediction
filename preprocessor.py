@@ -13,6 +13,7 @@ import torch
 
 from nsml import DATASET_PATH
 
+PRIVATE_NUMBER = 0
 pd.set_option("display.max_columns", 500)
 pd.set_option("display.max_rows", 500)
 
@@ -41,18 +42,18 @@ def hash_mapping(check_seq, mode, duration, route_id, station_seq, hash):
     if mode == "mean":
         if check_seq == False:
             if hash.get((route_id, station_seq)) == None:
-                # 여기에 1067 - 116 / 1358 - 124가 들어온다.
-                if (route_id == 1358 and station_seq == 124) or (
-                    route_id == 1067 and station_seq == 116
+
+                if (route_id == PRIVATE_NUMBER and station_seq == PRIVATE_NUMBER) or (
+                    route_id == PRIVATE_NUMBER and station_seq == PRIVATE_NUMBER
                 ):
-                    return 38
-                elif route_id == 1067 and station_seq > 62:
-                    tmp = station_seq - 1 - 62
-                    target = 62 - tmp - 1
+                    return PRIVATE_NUMBER
+                elif route_id == PRIVATE_NUMBER and station_seq > PRIVATE_NUMBER:
+                    tmp = station_seq - 1 - PRIVATE_NUMBER
+                    target = PRIVATE_NUMBER - tmp - 1
                     return hash[(route_id, target)]
-                elif route_id == 1358 and station_seq > 66:
-                    tmp = station_seq - 1 - 66
-                    target = 66 - tmp - 1
+                elif route_id == PRIVATE_NUMBER and station_seq > PRIVATE_NUMBER:
+                    tmp = station_seq - 1 - PRIVATE_NUMBER
+                    target = PRIVATE_NUMBER - tmp - 1
                     return hash[(route_id, target)]
                 else:
 
@@ -105,7 +106,6 @@ class Preprocessor:
         self.dist_normalizer = StandardScaler()
         self.dur_normalizer = StandardScaler()
 
-        # self.direction_hash = defaultdict(list)
         self.station_seq_hash = defaultdict()
         self.distance_hash = defaultdict()
         self.prev_mean_hash = defaultdict(float)
@@ -115,7 +115,7 @@ class Preprocessor:
 
     def _load_train_dataset(self, train_data_path=None):
         print("starting to load train data: ")
-        # random_seed(self.config.seed, False)
+        random_seed(self.config.seed, False)
         print(self.train_data_path)
 
         train_data = pd.read_parquet(self.train_data_path).sort_values(
@@ -148,8 +148,8 @@ class Preprocessor:
         for index, row in route_temp_df.iterrows():
             route_id = row["route_id"]
             n_stations = row["n_stations"]
-            if route_id == 18525:
-                n_stations = 99
+            if route_id == PRIVATE_NUMBER:
+                n_stations = PRIVATE_NUMBER
             self.station_seq_hash[route_id] = n_stations
         del route_temp_df
 
@@ -164,7 +164,6 @@ class Preprocessor:
         del dist_temp_df
 
         print("starting to make route encoder")
-        # self.direction_df = route_df[['route_id', 'turning_point_sequence']]
         list_route = list(set(shape_df["route_id"].unique())) + [0]
         self.route_encoder.fit(list_route)
         list_station = list(set(shape_df["station_id"].unique())) + [0]
@@ -174,7 +173,7 @@ class Preprocessor:
 
     def process_missing_value(self, concat, mode, k):
         print("[INFO - IMPUTATION]: imputation setting")
-        outlier = concat[concat["next_duration"] > 1500][["route_id", "station_seq"]]
+        outlier = concat[concat["next_duration"] > PRIVATE_NUMBER][["route_id", "station_seq"]]
         outlier_list = []
         for index, row in outlier.iterrows():
             route_id = row["route_id"]
@@ -193,17 +192,17 @@ class Preprocessor:
             self.next_median_hash[name] = next_median
 
         for key_ in self.prev_median_hash.keys():
-            if self.prev_median_hash[key_] > 1500:
+            if self.prev_median_hash[key_] > PRIVATE_NUMBER:
                 print(key_, self.prev_median_hash[key_])
 
         print("#" * 50)
         print("#" * 50)
         print("#" * 50)
         for key_ in self.next_median_hash.keys():
-            if self.next_median_hash[key_] > 1500:
+            if self.next_median_hash[key_] > PRIVATE_NUMBER:
                 print(key_, self.next_median_hash[key_])
 
-        idx = concat[concat["prev_duration"] > 1500].index
+        idx = concat[concat["prev_duration"] > PRIVATE_NUMBER].index
         concat.loc[idx, ["prev_duration"]] = concat.loc[
             idx, ["prev_duration", "route_id", "station_seq"]
         ].apply(
@@ -213,7 +212,7 @@ class Preprocessor:
             axis=1,
         )
 
-        idx = concat[concat["next_duration"] > 1500].index
+        idx = concat[concat["next_duration"] > PRIVATE_NUMBER].index
         concat.loc[idx, ["next_duration"]] = concat.loc[
             idx, ["next_duration", "route_id", "station_seq"]
         ].apply(
@@ -224,7 +223,7 @@ class Preprocessor:
         )
 
         print("median 처리 후, next_duration에 1500 이상 값 있는지 체크")
-        print(concat[concat["next_duration"] > 1500].head(200))
+        print(concat[concat["next_duration"] > PRIVATE_NUMBER].head(200))
 
         """
         start
@@ -332,8 +331,8 @@ class Preprocessor:
                         self.prev_mean_hash.get((route_id, seq_case)) == None
                         and self.next_mean_hash.get((route_id, seq_case)) != None
                     ):
-                        if (route_id == 1358 and seq_case == 124) or (
-                            route_id == 1067 and seq_case == 116
+                        if (route_id == PRIVATE_NUMBER and seq_case == PRIVATE_NUMBER) or (
+                            route_id == PRIVATE_NUMBER and seq_case == PRIVATE_NUMBER
                         ):
                             case = {
                                 "route_id": route_id,
@@ -347,20 +346,20 @@ class Preprocessor:
                                     (route_id, seq_case)
                                 ][1],
                                 "data_index": name,
-                                "prev_duration": 38,
+                                "prev_duration": PRIVATE_NUMBER,
                                 "next_duration": self.next_mean_hash[
                                     (route_id, seq_case)
                                 ],
                             }
                             data_entry_list.append(case)
                         else:
-                            print("except 1358, 1067 route id imputation case 2")
+                            # print("except 1358, 1067 route id imputation case 2")
                             raise ValueError
                         missing_cnt["2"] += 1
                     else:
                         # print("hash에 하나라도 없는 경우")
-                        if (route_id == 1358 and seq_case == 123) or (
-                            route_id == 1067 and seq_case == 115
+                        if (route_id == PRIVATE_NUMBER and seq_case == PRIVATE_NUMBER) or (
+                            route_id == PRIVATE_NUMBER and seq_case == PRIVATE_NUMBER
                         ):
                             case = {
                                 "route_id": route_id,
@@ -374,8 +373,8 @@ class Preprocessor:
                                     (route_id, seq_case)
                                 ][1],
                                 "data_index": name,
-                                "prev_duration": 120,
-                                "next_duration": 38,
+                                "prev_duration": PRIVATE_NUMBER,
+                                "next_duration": PRIVATE_NUMBER,
                             }
                             data_entry_list.append(case)
                         # else는 그냥 패스하면됨
@@ -419,8 +418,8 @@ class Preprocessor:
                         self.prev_median_hash.get((route_id, seq_case)) == None
                         and self.next_median_hash.get((route_id, seq_case)) != None
                     ):
-                        if (route_id == 1358 and seq_case == 124) or (
-                            route_id == 1067 and seq_case == 116
+                        if (route_id == PRIVATE_NUMBER and seq_case == PRIVATE_NUMBER) or (
+                            route_id == PRIVATE_NUMBER and seq_case == PRIVATE_NUMBER
                         ):
                             case = {
                                 "route_id": route_id,
@@ -441,13 +440,12 @@ class Preprocessor:
                             }
                             data_entry_list.append(case)
                         else:
-                            print("except 1358, 1067 route id imputation case 2")
                             raise ValueError
                         missing_cnt["2"] += 1
                     else:
                         # print("hash에 하나라도 없는 경우")
-                        if (route_id == 1358 and seq_case == 123) or (
-                            route_id == 1067 and seq_case == 115
+                        if (route_id == PRIVATE_NUMBER and seq_case == PRIVATE_NUMBER) or (
+                            route_id == PRIVATE_NUMBER and seq_case == PRIVATE_NUMBER
                         ):
                             case = {
                                 "route_id": route_id,
@@ -478,11 +476,6 @@ class Preprocessor:
             f">>>>>>> imputation count : {imputation_cnt}, prev mean만 존재 : {missing_cnt['1']}, next mean만 존재 : {missing_cnt['2']}, 둘 다 mean이 없는 경우 : {missing_cnt['3']}, total : {missing_cnt['1'] + missing_cnt['2'] + missing_cnt['3']}"
         )
 
-        """
-        여기부터 짜야함!!!!
-        여기짜고 테스트셋에도 똑같이 반영!!!!
-        """
-
         concat_hour = (
             concat.groupby(["data_index"]).fillna(method="ffill").fillna(method="bfill")
         )
@@ -507,7 +500,7 @@ class Preprocessor:
     def replace_outlier_using_mean(self, concat):
         print("[INFO - REPLACE]", "\n")
 
-        idx = concat[concat["prev_duration"] < 5].index
+        idx = concat[concat["prev_duration"] < PRIVATE_NUMBER].index
         concat.loc[idx, ["prev_duration"]] = concat.loc[
             idx, ["prev_duration", "route_id", "station_seq"]
         ].apply(
@@ -516,7 +509,7 @@ class Preprocessor:
             ),
             axis=1,
         )
-        idx = concat[concat["next_duration"] < 5].index
+        idx = concat[concat["next_duration"] < PRIVATE_NUMBER].index
         concat.loc[idx, ["next_duration"]] = concat.loc[
             idx, ["next_duration", "route_id", "station_seq"]
         ].apply(
@@ -529,8 +522,7 @@ class Preprocessor:
         return concat
 
     def split_data(self, concat):
-        # train_idx, valid_idx = train_test_split(np.arange(1,383327 + 1), test_size = 0.2)
-        train_idx, valid_idx = train_test_split(np.arange(1, 383327 + 1), test_size=0.2)
+        train_idx, valid_idx = train_test_split(np.arange(1, PRIVATE_NUMBER + 1), test_size=0.2)
         train_idx, valid_idx = set(train_idx.tolist()), set(valid_idx.tolist())
         data_grouped = concat.groupby(["data_index"])
         train_list = []
@@ -555,7 +547,7 @@ class Preprocessor:
         return trainset, validset
 
     def sampling(self, concat):
-        full_len = 383328
+        full_len = PRIVATE_NUMBER
         sample_len = int(full_len * self.args.random_sampling)
         sampling_idx = np.random.choice(full_len, sample_len)
         sampling_idx = set(sampling_idx.tolist())
@@ -711,8 +703,8 @@ class Preprocessor:
                     }
                     data_entry_list.append(case)
                 else:
-                    if (route_id == 1358 and seq_case == 124) or (
-                        route_id == 1067 and seq_case == 116
+                    if (route_id == PRIVATE_NUMBER and seq_case == PRIVATE_NUMBER) or (
+                        route_id == PRIVATE_NUMBER and seq_case == PRIVATE_NUMBER
                     ):
                         case = {
                             "route_id": route_id,
@@ -724,7 +716,7 @@ class Preprocessor:
                                 (route_id, seq_case)
                             ][1],
                             "data_index": data_index,
-                            "prev_duration": 38,
+                            "prev_duration": PRIVATE_NUMBER,
                         }
                         data_entry_list.append(case)
                     else:
@@ -752,7 +744,7 @@ class Preprocessor:
         """
         outlier 제거!!!!
         """
-        idx = test_data[test_data["prev_duration"] > 1500].index
+        idx = test_data[test_data["prev_duration"] > PRIVATE_NUMBER].index
         test_data.loc[idx, ["prev_duration"]] = test_data.loc[
             idx, ["prev_duration", "route_id", "station_seq"]
         ].apply(
@@ -762,7 +754,6 @@ class Preprocessor:
             axis=1,
         )
 
-        # concat = concat.groupby(['data_index']).fillna(method = 'ffill').fillna(method = 'bfill')
         test_data_hour = (
             test_data.groupby(["data_index"])
             .fillna(method="ffill")
@@ -829,12 +820,12 @@ class Preprocessor:
         k = null_data["station_seq"].min()
         n = null_data["station_seq"].max()
 
-        if route_id == 5113 and k <= 61:
+        if route_id == PRIVATE_NUMBER and k <= PRIVATE_NUMBER:
             flag_300 = True
         else:
             flag_300 = False
 
-        if route_id == 1346 and k <= 33:
+        if route_id == PRIVATE_NUMBER and k <= PRIVATE_NUMBER:
             flag_1346 = True
         else:
             flag_1346 = False
@@ -888,9 +879,6 @@ class Preprocessor:
             test_data_selected["station_id"] = self.station_encoder.transform(
                 test_data_selected["station_id"]
             )
-            # raise Exception(f"{test_data_selected}")
-            # if k < 32:
-            #     raise Exception(f"\n\nk: {k}\n\n test data: \n{test_data}\n\n\n test_data selected :\n{test_data_selected}\n\n ")
             unique = np.unique(
                 np.array(test_data_selected["station_seq"]), return_counts=True
             )
@@ -899,7 +887,6 @@ class Preprocessor:
                     f"\n unique : {unique}, \n\n test_data: \n {test_data}\n\ntest_data_selected:\n {test_data_selected}"
                 )
 
-        # 총 n-k + 1개를 예측해야함.
         return test_data_selected, k, n, info, flag, flag_300, flag_1346
 
 
